@@ -1,6 +1,9 @@
 from flask import Flask, request, jsonify
 from datetime import datetime
 from flask_mysqldb import MySQL
+import boto3
+from botocore.exceptions import ClientError
+import os
 import logging
 
 server = Flask(__name__)
@@ -28,17 +31,21 @@ def upload():
     logging.debug(f"Email: {request.form['email']}")
     email = request.form['email']
 
-    current_datetime = datetime.now().strftime("%Y%m%d")
+    current_datetime = datetime.now().strftime("%Y%m%d%H%M%S")
     s = building + "_" + floor + "_" + current_datetime
     logging.debug(f"New Filename: {s}")
 
     # Store image to aws s3 blob storage
     f = request.files['image']
-    #f.save('/Users/hyltonmcdonald/Desktop/gatewaydump/upload.png')
-    imageURL = 'dummy.s3.image.url'
+    f.save('./temp/' + s + '.png')
+
+    # imageURL = uploadtoS3(("./temp/" + s + ".png"), f)
+    imageURL = "dumm.dum"
+    stat = uploadtoS3(s, f)
 
     # Store details mysql database
-    isRequestStored = storerequest(email,s,imageURL)
+    #isRequestStored = storerequest(email,s,imageURL)
+    isRequestStored = True
 
     if isRequestStored == True:
         data = {
@@ -63,6 +70,28 @@ def upload():
     response.headers['Access-Control-Allow-Origin'] = '*'
 
     return response
+
+# Uploading to Amazon S3
+def uploadtoS3(file_name, bucket):
+    file_n = "./temp/" + file_name + ".png"
+    logging.debug("Filename=" + file_n)
+    bucket = "floor-mapping"
+    object_key = "floor-images/" + file_name + ".png"
+    logging.debug("Object-Key=" + object_key)
+
+    s3_client = boto3.client('s3')
+    try:
+        response = s3_client.upload_file(file_n, bucket, object_key)
+    except ClientError as e:
+        logging.error(e)
+        return False
+    logging.debug(response)
+    return True
+
+
+
+
+    return "dummy.s3.image.url"
 
 def storerequest(email,filename,imageurl):
     try:
