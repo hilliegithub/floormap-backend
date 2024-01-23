@@ -17,40 +17,37 @@ server.config["MYSQL_PASSWORD"] = '123456'
 server.config["MYSQL_DB"] = 'floormap'
 server.config["MYSQL_PORT"] = 3306
 
+AWS_CONFIG = {
+    'bucket' : 'floor-mapping',
+    'region' : 'ca-central-1'
+}
+
 ## POST /Upload --- Upload the image to the blob storage.
 ## Return the image name so that the image can be queried.
 @server.route("/upload", methods=["POST"])
 def upload():
-    #logging.debug(f"{request.headers}")
-    logging.debug(f"Image filename: {request.files['image'].filename}")
-    logging.debug(f"Building name: {request.form['building']}")
+    f = request.files['image']
+    currentFileLocation = './temp/' + request.files['image'].filename
+    f.save(currentFileLocation)
     building = request.form['building']
-
-    logging.debug(f"Floor: {request.form['floor']}")
     floor = request.form['floor']
-    logging.debug(f"Email: {request.form['email']}")
     email = request.form['email']
 
     current_datetime = datetime.now().strftime("%Y%m%d%H%M%S")
-    s = building + "_" + floor + "_" + current_datetime
-    logging.debug(f"New Filename: {s}")
+    newFilename = building + "_" + floor + "_" + current_datetime
+    newFilename = newFilename.lower()
 
     # Store image to aws s3 blob storage
-    f = request.files['image']
-    f.save('./temp/' + s + '.png')
-
-    # imageURL = uploadtoS3(("./temp/" + s + ".png"), f)
-    imageURL = "dumm.dum"
-    stat = uploadtoS3(s, f)
+    status = uploadtoS3(newFilename, currentFileLocation)
 
     # Store details mysql database
-    #isRequestStored = storerequest(email,s,imageURL)
-    isRequestStored = True
+    isRequestStored =  False
+    if status["stat"]:
+        isRequestStored = storerequest(email,newFilename,status["url"])
 
-    if isRequestStored == True:
+    if isRequestStored and status["stat"]:
         data = {
-            'imagename': s,
-            'imageURL': imageURL,
+            'imagename': newFilename,
             'error': {
                 'status': 'false',
                 'message': 'No Errors'
@@ -58,8 +55,7 @@ def upload():
         }
     else:
         data = {
-            'imagename': s,
-            'imageURL': imageURL,
+            'imagename': newFilename,
             'error': {
                 'status': 'true',
                 'message': 'Could not store request'
@@ -72,26 +68,21 @@ def upload():
     return response
 
 # Uploading to Amazon S3
-def uploadtoS3(file_name, bucket):
-    file_n = "./temp/" + file_name + ".png"
-    logging.debug("Filename=" + file_n)
-    bucket = "floor-mapping"
-    object_key = "floor-images/" + file_name + ".png"
-    logging.debug("Object-Key=" + object_key)
+def uploadtoS3(newFilename, currentFileLocation):
+    old_filename, ext = os.path.splitext(currentFileLocation)
+    bucket = AWS_CONFIG['bucket']
+    object_key = "floor-images/" + newFilename + ext
+    url = 'https://' + AWS_CONFIG['bucket'] + '.s3.' + AWS_CONFIG['region'] + '.amazonaws.com/' + object_key
 
-    s3_client = boto3.client('s3')
+    #s3_client = boto3.client('s3')
     try:
-        response = s3_client.upload_file(file_n, bucket, object_key)
+        print("test")
+        #response = s3_client.upload_file(currentFileLocation, bucket, object_key)
     except ClientError as e:
         logging.error(e)
-        return False
-    logging.debug(response)
-    return True
-
-
-
-
-    return "dummy.s3.image.url"
+        return {"stat" : False, "url" : url}
+    print(url)
+    return {"stat" : True, "url" :url}
 
 def storerequest(email,filename,imageurl):
     try:
@@ -106,8 +97,45 @@ def storerequest(email,filename,imageurl):
         logging.debug(err)
         return False
 
+def getImageFrmMySql(imgname):
+    try:
+        cur = mysql.connection.cursor()
+        cur.execute(
+            "SELECT imageurl FROM request WHERE floormapname=%s", (imgname,)
+        )
+        res = cur.fetchall()
+        cur.close()
+
+        for id in res:
+            print(id)
+
+        return id
+
+    except Exception as err:
+        logging.debug(err)
+        return ''
+
 ## GET /floor-map-select/:id --- Get the image
 ## Return the image to use
+@server.route("/getimage", methods=["GET"])
+def getimage():
+    imgName = request.args.get("img")
+    #print(imgName)
+
+    if not imgName:
+        data = {"status": False,"imgurl": "../../assets/floorplan.png"}
+        response = server.make_response(jsonify(data))
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        return response
+
+
+    ## get the image url from database
+    imgurl = getImageFrmMySql(imgName)
+
+    data = {"status": True,"imgurl": imgurl[0]}
+    response = server.make_response(jsonify(data))
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    return response
 
 if __name__ == "__main__":
     server.run(host="0.0.0.0", port=8080)
