@@ -10,6 +10,5 @@ CREATE TABLE request (
     id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
     email VARCHAR(255) NOT NULL,
     floormapname VARCHAR(255) NOT NULL,
-    imageurl VARCHAR(255) UNIQUE,
-    mappingfileurl VARCHAR(255)
+    mappingfileAwsKey VARCHAR(255)
 );

@@ -29,6 +29,8 @@ def upload():
     f = request.files['image']
     currentFileLocation = './temp/' + request.files['image'].filename
     f.save(currentFileLocation)
+    old_filename, ext = os.path.splitext(currentFileLocation)
+
     building = request.form['building']
     floor = request.form['floor']
     email = request.form['email']
@@ -36,16 +38,17 @@ def upload():
     current_datetime = datetime.now().strftime("%Y%m%d%H%M%S")
     newFilename = building + "_" + floor + "_" + current_datetime
     newFilename = newFilename.lower()
+    print(newFilename)
 
     # Store image to aws s3 blob storage
-    status = uploadtoS3(newFilename, currentFileLocation)
+    status = uploadtoS3((newFilename + ext), currentFileLocation)
 
     # Store details mysql database
     isRequestStored =  False
-    if status["stat"]:
-        isRequestStored = storerequest(email,newFilename,status["url"])
+    if status:
+        isRequestStored = storerequest(email,(newFilename+ext))
 
-    if isRequestStored and status["stat"]:
+    if isRequestStored and status:
         data = {
             'imagename': newFilename,
             'error': {
@@ -69,9 +72,9 @@ def upload():
 
 # Uploading to Amazon S3
 def uploadtoS3(newFilename, currentFileLocation):
-    old_filename, ext = os.path.splitext(currentFileLocation)
+    print("Inside uploadtos3: " + newFilename)
     bucket = AWS_CONFIG['bucket']
-    object_key = "floor-images/" + newFilename + ext
+    object_key = "floor-images/" + newFilename
     url = 'https://' + AWS_CONFIG['bucket'] + '.s3.' + AWS_CONFIG['region'] + '.amazonaws.com/' + object_key
 
     #s3_client = boto3.client('s3')
@@ -80,15 +83,15 @@ def uploadtoS3(newFilename, currentFileLocation):
         #response = s3_client.upload_file(currentFileLocation, bucket, object_key)
     except ClientError as e:
         logging.error(e)
-        return {"stat" : False, "url" : url}
+        return False
     print(url)
-    return {"stat" : True, "url" :url}
+    return True
 
-def storerequest(email,filename,imageurl):
+def storerequest(email,filename):
     try:
         cur = mysql.connection.cursor()
         res = cur.execute(
-            "INSERT INTO request (email,floormapname,imageurl) VALUES (%s,%s,%s);", (email,filename,imageurl,)
+            "INSERT INTO request (email,floormapname) VALUES (%s,%s);", (email,filename,)
         )
         mysql.connection.commit()
         cur.close()
@@ -101,7 +104,7 @@ def getImageFrmMySql(imgname):
     try:
         cur = mysql.connection.cursor()
         cur.execute(
-            "SELECT imageurl FROM request WHERE floormapname=%s", (imgname,)
+            "SELECT floormapname FROM request WHERE floormapname LIKE %s LIMIT 1", ("%" + imgname + "%",)
         )
         res = cur.fetchall()
         cur.close()
@@ -109,7 +112,7 @@ def getImageFrmMySql(imgname):
         for id in res:
             print(id)
 
-        return id
+        return res
 
     except Exception as err:
         logging.debug(err)
@@ -120,20 +123,31 @@ def getImageFrmMySql(imgname):
 @server.route("/getimage", methods=["GET"])
 def getimage():
     imgName = request.args.get("img")
-    #print(imgName)
-
     if not imgName:
-        data = {"status": False,"imgurl": "../../assets/floorplan.png"}
+        data = {"status": False,"imageKey": ""}
         response = server.make_response(jsonify(data))
         response.headers['Access-Control-Allow-Origin'] = '*'
         return response
 
-
+    print(imgName)
     ## get the image url from database
-    imgurl = getImageFrmMySql(imgName)
+    imgKey = getImageFrmMySql(imgName)
+    print(imgKey)
 
-    data = {"status": True,"imgurl": imgurl[0]}
+    if(len(imgKey) == 0):
+        data = {"status": False,"imageKey": ''}
+    else:
+        data = {"status": True,"imageKey": imgKey[0]}
     response = server.make_response(jsonify(data))
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    return response
+
+@server.route("/createmap", methods=["POST"])
+def createmap():
+    json_data = request.json
+    logging.debug(request)
+
+    response = server.make_response("Okay, progress")
     response.headers['Access-Control-Allow-Origin'] = '*'
     return response
 
