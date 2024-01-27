@@ -1,13 +1,18 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 from datetime import datetime
 from flask_mysqldb import MySQL
 import boto3
 from botocore.exceptions import ClientError
+import json
 import os
 import logging
+import csv
+from send import email
 
 server = Flask(__name__)
 mysql = MySQL(server)
+CORS(server)
 logging.basicConfig(level=logging.DEBUG)
 
 #config
@@ -41,7 +46,7 @@ def upload():
     print(newFilename)
 
     # Store image to aws s3 blob storage
-    status = uploadtoS3((newFilename + ext), currentFileLocation)
+    status = uploadtoS3((newFilename + ext), currentFileLocation, "floor-images/")
 
     # Store details mysql database
     isRequestStored =  False
@@ -71,10 +76,10 @@ def upload():
     return response
 
 # Uploading to Amazon S3
-def uploadtoS3(newFilename, currentFileLocation):
+def uploadtoS3(newFilename, currentFileLocation, folder):
     print("Inside uploadtos3: " + newFilename)
     bucket = AWS_CONFIG['bucket']
-    object_key = "floor-images/" + newFilename
+    object_key = folder + newFilename
     url = 'https://' + AWS_CONFIG['bucket'] + '.s3.' + AWS_CONFIG['region'] + '.amazonaws.com/' + object_key
 
     #s3_client = boto3.client('s3')
@@ -104,14 +109,10 @@ def getImageFrmMySql(imgname):
     try:
         cur = mysql.connection.cursor()
         cur.execute(
-            "SELECT floormapname FROM request WHERE floormapname LIKE %s LIMIT 1", ("%" + imgname + "%",)
+            "SELECT * FROM request WHERE floormapname LIKE %s LIMIT 1", ("%" + imgname + "%",)
         )
         res = cur.fetchall()
         cur.close()
-
-        for id in res:
-            print(id)
-
         return res
 
     except Exception as err:
@@ -129,26 +130,107 @@ def getimage():
         response.headers['Access-Control-Allow-Origin'] = '*'
         return response
 
-    print(imgName)
-    ## get the image url from database
-    imgKey = getImageFrmMySql(imgName)
-    print(imgKey)
+    imgKey = None
+    try:
+        ## get the image url from database
+        imgKey = getImageFrmMySql(imgName)
+        print(imgKey)
+        # print(imgKey[0])
+        print(imgKey[0][1])
+        print(imgKey[0][2])
+
+    except Exception as err:
+        logging.debug(err)
 
     if(len(imgKey) == 0):
-        data = {"status": False,"imageKey": ''}
+        data = {
+            'imageKey': '',
+            'error': {
+                'status': 'true',
+                'message': 'Could not find a matching image-map'
+            }
+        }
     else:
-        data = {"status": True,"imageKey": imgKey[0]}
+        data = {
+            'imageKey': imgKey[0][2],
+            'error': {
+                'status': 'false',
+                'message': 'No errors found'
+            }
+        }
+
+    print(data)
     response = server.make_response(jsonify(data))
     response.headers['Access-Control-Allow-Origin'] = '*'
     return response
 
 @server.route("/createmap", methods=["POST"])
+# @cross_origin()
 def createmap():
-    json_data = request.json
-    logging.debug(request)
+    data = None
+    try:
+        json_data = request.json
+        jsonMap = request.get_json(silent=True)
 
-    response = server.make_response("Okay, progress")
-    response.headers['Access-Control-Allow-Origin'] = '*'
+        filename = './tempmaps/' + jsonMap['boundary']['floormapname'] + '.csv'
+        print(filename)
+        with open(filename, mode='w') as map_file:
+            file_writer = csv.writer(map_file, delimiter=',',quotechar='|', quoting=csv.QUOTE_MINIMAL)
+            file_writer.writerow(['Name','top','right','bottom','left','width','height'])
+            file_writer.writerow([jsonMap['boundary']['floormapname'],
+            jsonMap['boundary']['top'],
+            jsonMap['boundary']['right'],
+            jsonMap['boundary']['bottom'],
+            jsonMap['boundary']['left'],
+            jsonMap['boundary']['width'],
+            jsonMap['boundary']['height']]
+            )
+            for seat in jsonMap['seats']:
+                file_writer.writerow([seat['name'],
+                seat['relativeTop'],
+                seat['relativeRight'],
+                seat['relativeBottom'],
+                seat['relativeLeft']]
+                )
+
+        # Store file to aws s3 blob storage
+        status = uploadtoS3((jsonMap['boundary']['floormapname'] + '.csv'), filename, "floor-mappings/")
+        if not status:
+            raise Exception('Could not upload mapping file to s3')
+
+        result = getImageFrmMySql(jsonMap['boundary']['floormapname'])
+        if(len(result) == 0):
+            raise Exception('Createmap: Could not find image name in database.')
+        # print(result)
+        url = 'https://' + AWS_CONFIG['bucket'] + '.s3.' + AWS_CONFIG['region'] + '.amazonaws.com/floor-images/' + result[0][2]
+        print(url)
+        # err = email.notify(filename,url,result[1])
+        # if err:
+            # raise Exception('Could not send email')
+
+    except Exception as exp:
+        print(exp)
+        print(dir(exp))
+        data = {
+            'imagename': jsonMap['boundary']['floormapname'],
+            'error': {
+                'status': 'true',
+                'message': 'Unexpected error'
+            }
+        }
+
+    if not data:
+        data = {
+            'imagename': jsonMap['boundary']['floormapname'],
+            'error': {
+                'status': 'false',
+                'message': 'No Errors'
+            }
+        }
+
+
+    response = server.make_response(jsonify(data))
+    response.headers.add('Access-Control-Allow-Origin','*')
     return response
 
 if __name__ == "__main__":
