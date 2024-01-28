@@ -77,19 +77,17 @@ def upload():
 
 # Uploading to Amazon S3
 def uploadtoS3(newFilename, currentFileLocation, folder):
-    print("Inside uploadtos3: " + newFilename)
     bucket = AWS_CONFIG['bucket']
     object_key = folder + newFilename
-    url = 'https://' + AWS_CONFIG['bucket'] + '.s3.' + AWS_CONFIG['region'] + '.amazonaws.com/' + object_key
+    # url = 'https://' + AWS_CONFIG['bucket'] + '.s3.' + AWS_CONFIG['region'] + '.amazonaws.com/' + object_key
 
-    #s3_client = boto3.client('s3')
+    s3_client = boto3.client('s3')
     try:
         print("test")
-        #response = s3_client.upload_file(currentFileLocation, bucket, object_key)
+        response = s3_client.upload_file(currentFileLocation, bucket, object_key)
     except ClientError as e:
         logging.error(e)
         return False
-    print(url)
     return True
 
 def storerequest(email,filename):
@@ -134,11 +132,6 @@ def getimage():
     try:
         ## get the image url from database
         imgKey = getImageFrmMySql(imgName)
-        print(imgKey)
-        # print(imgKey[0])
-        print(imgKey[0][1])
-        print(imgKey[0][2])
-
     except Exception as err:
         logging.debug(err)
 
@@ -173,7 +166,6 @@ def createmap():
         jsonMap = request.get_json(silent=True)
 
         filename = './tempmaps/' + jsonMap['boundary']['floormapname'] + '.csv'
-        print(filename)
         with open(filename, mode='w') as map_file:
             file_writer = csv.writer(map_file, delimiter=',',quotechar='|', quoting=csv.QUOTE_MINIMAL)
             file_writer.writerow(['Name','top','right','bottom','left','width','height'])
@@ -201,16 +193,14 @@ def createmap():
         result = getImageFrmMySql(jsonMap['boundary']['floormapname'])
         if(len(result) == 0):
             raise Exception('Createmap: Could not find image name in database.')
-        # print(result)
         url = 'https://' + AWS_CONFIG['bucket'] + '.s3.' + AWS_CONFIG['region'] + '.amazonaws.com/floor-images/' + result[0][2]
-        print(url)
-        # err = email.notify(filename,url,result[1])
-        # if err:
-            # raise Exception('Could not send email')
+
+        err = email.notify(filename,url,result[0][1])
+        if err:
+           raise Exception('Could not send email')
 
     except Exception as exp:
         print(exp)
-        print(dir(exp))
         data = {
             'imagename': jsonMap['boundary']['floormapname'],
             'error': {
