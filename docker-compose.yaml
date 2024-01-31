@@ -1,0 +1,17 @@
+services:
+  gatewayapp:
+    container_name: gatewayappcontainer
+    build: .
+    image: gatewayapp:v1
+    environment:
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_ACCESS_KEY_ID}
+      - GMAIL_ADDRESS=${GMAIL_ADDRESS}
+      - GMAIL_PASSWORD=${GMAIL_PASSWORD}
+      - MYSQL_HOST=${MYSQL_HOST}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_DB=${MYSQL_DB}
+      - MYSQL_PORT=${MYSQL_PORT}
+    ports:
+      - 8080:8080

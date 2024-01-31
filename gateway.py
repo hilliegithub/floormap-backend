@@ -16,11 +16,11 @@ CORS(server)
 logging.basicConfig(level=logging.DEBUG)
 
 #config
-server.config["MYSQL_HOST"] = '127.0.0.1'
-server.config["MYSQL_USER"] = 'floormap_db_user'
-server.config["MYSQL_PASSWORD"] = '123456'
-server.config["MYSQL_DB"] = 'floormap'
-server.config["MYSQL_PORT"] = 3306
+server.config["MYSQL_HOST"] = os.environ["MYSQL_HOST"]
+server.config["MYSQL_USER"] = os.environ["MYSQL_USER"]
+server.config["MYSQL_PASSWORD"] = os.environ["MYSQL_PASSWORD"]
+server.config["MYSQL_DB"] = os.environ["MYSQL_DB"]
+server.config["MYSQL_PORT"] = os.environ["MYSQL_PORT"]
 
 AWS_CONFIG = {
     'bucket' : 'floor-mapping',
@@ -43,14 +43,14 @@ def upload():
     current_datetime = datetime.now().strftime("%Y%m%d%H%M%S")
     newFilename = building + "_" + floor + "_" + current_datetime
     newFilename = newFilename.lower()
-    print(newFilename)
+    print("FILENAME:" + newFilename)
 
     # Store image to aws s3 blob storage
     status = uploadtoS3((newFilename + ext), currentFileLocation, "floor-images/")
 
     # Store details mysql database
     isRequestStored =  False
-    if status:
+    if status and check_mysql_connection():
         isRequestStored = storerequest(email,(newFilename+ext))
 
     if isRequestStored and status:
@@ -101,6 +101,19 @@ def storerequest(email,filename):
         return True
     except Exception as err:
         logging.debug(err)
+        return False
+
+def check_mysql_connection():
+    try:
+        # Check if mysql.connection is not None
+        if mysql.connection is not None:
+            print("MySQL connection is established.")
+            return True
+        else:
+            print("MySQL connection is not established.")
+            return False
+    except Exception as err:
+        logging.debug("Error while checking MySQL connection:", err)
         return False
 
 def getImageFrmMySql(imgname):
