@@ -8,8 +8,8 @@ WORKDIR /app
 COPY ./requirements.txt /app/
 RUN pip install --no-cache-dir --requirement /app/requirements.txt
 COPY . /app/
-RUN mkdir /temp && mkdir /tempmaps
+RUN mkdir -p -v /app/temp && mkdir /app/tempmaps
 
-EXPOSE 5000
+EXPOSE 8080
 
 CMD [ "python3", "gateway.py" ]

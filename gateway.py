@@ -20,7 +20,7 @@ server.config["MYSQL_HOST"] = os.environ["MYSQL_HOST"]
 server.config["MYSQL_USER"] = os.environ["MYSQL_USER"]
 server.config["MYSQL_PASSWORD"] = os.environ["MYSQL_PASSWORD"]
 server.config["MYSQL_DB"] = os.environ["MYSQL_DB"]
-server.config["MYSQL_PORT"] = os.environ["MYSQL_PORT"]
+server.config["MYSQL_PORT"] = int(os.environ["MYSQL_PORT"])
 
 AWS_CONFIG = {
     'bucket' : 'floor-mapping',
@@ -116,6 +116,31 @@ def check_mysql_connection():
         logging.debug("Error while checking MySQL connection:", err)
         return False
 
+def create_presigned_url(bucket_name, object_name, expiration=3600):
+    """Generates a presigned URL to share an S3 object
+
+    :param bucket_name: string
+    :param object_name: string
+    :param expiration: Time in seconds for the presigned URL to remain valid
+    :return: Presigned URL as string. If error, returns None.
+    """
+    # This function is borrowed from AWS's documentation here:
+    # https://boto3.amazonaws.com/v1/documentation/api/latest/guide/s3-presigned-urls.html#presigned-urls
+
+    # generate a presigned URL for the S3 obecj
+    s3_client = boto3.client('s3')
+    try:
+        image_url = s3_client.generate_presigned_url('get_object',
+                                                    Params={'Bucket': bucket_name,
+                                                            'Key': object_name},
+                                                    ExpiresIn=expiration)
+    except ClientError as e:
+        logging.error(e)
+        return None
+
+    # The image_url contains the presigned URL
+    return image_url
+
 def getImageFrmMySql(imgname):
     try:
         cur = mysql.connection.cursor()
@@ -131,7 +156,7 @@ def getImageFrmMySql(imgname):
         return ''
 
 ## GET /floor-map-select/:id --- Get the image
-## Return the image to use
+## Return the image's presignedURL to use
 @server.route("/getimage", methods=["GET"])
 def getimage():
     imgName = request.args.get("img")
@@ -141,16 +166,30 @@ def getimage():
         response.headers['Access-Control-Allow-Origin'] = '*'
         return response
 
-    imgKey = None
+    query_result = None
+    image_url = None
     try:
         ## get the image url from database
-        imgKey = getImageFrmMySql(imgName)
+        query_result = getImageFrmMySql(imgName)
+
+        if(query_result != None):
+            image_url = create_presigned_url('floor-mapping',('floor-images/' + query_result[0][2]))
     except Exception as err:
         logging.debug(err)
 
-    if(len(imgKey) == 0):
+    if(query_result == None or image_url == None):
+        data = {
+            'imageKey': imgName,
+            'imageUrl': 'N/A',
+            'error': {
+                'status': 'true',
+                'message': 'Could not find a matching image or create its uri.'
+            }
+        }
+    elif(len(query_result) == 0):
         data = {
             'imageKey': '',
+            'imageUrl': 'N/A',
             'error': {
                 'status': 'true',
                 'message': 'Could not find a matching image-map'
@@ -158,7 +197,8 @@ def getimage():
         }
     else:
         data = {
-            'imageKey': imgKey[0][2],
+            'imageKey': query_result[0][2],
+            'imageUrl': image_url,
             'error': {
                 'status': 'false',
                 'message': 'No errors found'
@@ -167,7 +207,7 @@ def getimage():
 
     print(data)
     response = server.make_response(jsonify(data))
-    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers.add('Access-Control-Allow-Origin','*')
     return response
 
 @server.route("/createmap", methods=["POST"])
@@ -203,12 +243,14 @@ def createmap():
         if not status:
             raise Exception('Could not upload mapping file to s3')
 
+        # Get the email address to be used to send the notification
         result = getImageFrmMySql(jsonMap['boundary']['floormapname'])
         if(len(result) == 0):
             raise Exception('Createmap: Could not find image name in database.')
         url = 'https://' + AWS_CONFIG['bucket'] + '.s3.' + AWS_CONFIG['region'] + '.amazonaws.com/floor-images/' + result[0][2]
 
         err = email.notify(filename,url,result[0][1])
+        # err = email.notify(filename,'http://amazon.com','hyltonmcdonald@gmail.com')
         if err:
            raise Exception('Could not send email')
 
